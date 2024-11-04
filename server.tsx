@@ -1,24 +1,60 @@
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
-const axios = require("axios"); // Use axios for API requests
+const axios = require("axios");
 const Groq = require("groq-sdk");
+const dotenv = require("dotenv");
 
-const token = "7363518040:AAG415iNi8127l2tCIw7zaFV73J8CVf2G5o";
-const MY_TG_ID = 314044882;
+// Load environment variables
+dotenv.config();
+
+const token = process.env.TELEGRAM_BOT_TOKEN;
+const MY_TG_ID = Number(process.env.MY_TG_ID);
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+
 const bot = new TelegramBot(token, { polling: true });
 
-const GROQ_API_URL = "https://api.groq.com/spam_detection"; // Replace with the actual API endpoint
-const GROQ_API_KEY = "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"; // Replace with your Groq API key
+const GROQ_API_URL = "https://api.groq.com/spam_detection";
 
 const groq = new Groq({ apiKey: GROQ_API_KEY });
-// this is initial test span words
-var spamKeywords = {
-  words: ["спамслово1", "спамслово2", "спамслово3"],
+
+// Define interfaces for structured data
+/**
+ * @typedef {Object} SpamKeywordData
+ * @property {string[]} words
+ * @property {number} countOfbanned
+ * @property {number} countOfbannedAI
+ */
+type SpamKeywordData = {
+  words: string[];
+  countOfbanned: number;
+  countOfbannedAI: number;
+};
+
+type SpamMsgsData = {
+  msg: string[];
+  countOfbanned: number;
+};
+
+type TelegramMessage = {
+  chat: { id: number };
+  from: { id: number; username: string };
+  text: string;
+  message_id: number;
+};
+
+type SpamLog = {
+  user: { id: number; username: string };
+  msg: string;
+};
+
+// Initialize data structures
+let spamKeywords: SpamKeywordData = {
+  words: ["БЕССПЛАТНЫЙ", "Удаленный", "Пассивный"],
   countOfbanned: 0,
   countOfbannedAI: 0,
 };
 
-var spamMsgs = {
+let spamMsgs: SpamMsgsData = {
   msg: [
     "Наркота, онлайн бессплатно! налетай!",
     "Хoчeшь пaccивный дoxод? Нaпиши мнe + и я тeбe рaccкaжу кaк yдлaённo пoлучaть дoxод с минимaльными yсилиями Ждy в л.c.p.",
@@ -27,46 +63,82 @@ var spamMsgs = {
   countOfbanned: 0,
 };
 
-// Functions for saving and loading spam keywords and logs
-const saveKeywords = () =>
+// An array to store logs of banned users
+let spamLogs: SpamLog[] = [];
+
+// Function to save keywords to a file
+const saveKeywords = (): void =>
   fs.writeFileSync("spamKeywords.json", JSON.stringify(spamKeywords));
-const saveMsgs = () =>
+
+// Function to save messages to a file
+const saveMsgs = (): void =>
   fs.writeFileSync("spamMsgs.json", JSON.stringify(spamMsgs));
 
-const saveLogs = (spamLogs) =>
+// Function to save logs to a file
+const saveLogs = (): void =>
   fs.writeFileSync("spamLogs.json", JSON.stringify(spamLogs));
-var spamLogs = [];
-const loadLogs = async () => {
-  if (await fs.existsSync("spamLogs.json")) {
-    spamLogs = JSON.parse(await fs.readFileSync("spamLogs.json"));
-  }
-};
-const loadKeywords = async () => {
-  if (await fs.existsSync("spamKeywords.json")) {
-    spamKeywords = JSON.parse(await fs.readFileSync("spamKeywords.json"));
+
+// Load logs from file, if available
+const loadLogs = async (): Promise<void> => {
+  if (fs.existsSync("spamLogs.json")) {
+    spamLogs = JSON.parse(fs.readFileSync("spamLogs.json", "utf-8"));
   }
 };
 
-bot.onText(/\/start/, (msg) =>
-  bot.sendMessage(msg.chat.id, "Привет! Я твой рыбо анти-спам бот.")
-);
-bot.onText(/\/list/, (msg) =>
-  bot.sendMessage(msg.chat.id, `список "${JSON.stringify(spamKeywords)}"`)
-);
-bot.onText(/\/logs/, (msg) =>
+// Load keywords from file, if available
+const loadKeywords = async (): Promise<void> => {
+  if (fs.existsSync("spamKeywords.json")) {
+    spamKeywords = JSON.parse(fs.readFileSync("spamKeywords.json", "utf-8"));
+  }
+};
+
+// Function to ban a user and log the action
+const bannUser = (msg: TelegramMessage): void => {
   bot.sendMessage(
     msg.chat.id,
-    `logs "${JSON.stringify(spamLogs)}"` + spamLogs.length
+    `Пользователь ${msg.from.username} был заблокирован за спам.`
+  );
+  spamKeywords.countOfbannedAI += 1;
+  spamLogs.push({ user: msg.from, msg: msg.text });
+  saveKeywords();
+  saveLogs();
+  axios
+    .get(`https://api.telegram.org/bot${token}/sendMessage`, {
+      params: {
+        chat_id: MY_TG_ID,
+        text: `BaNN USER: ${JSON.stringify(msg.from)}\n ${msg.text}`,
+      },
+    })
+    .catch(console.log);
+};
+
+// Bot command handlers
+bot.onText(/\/start/, (msg: TelegramMessage) =>
+  bot.sendMessage(msg.chat.id, "Привет! Я твой рыбо анти-спам бот.")
+);
+bot.onText(/\/listmsg/, (msg: TelegramMessage) =>
+  bot.sendMessage(msg.chat.id, `список msg: "${JSON.stringify(spamMsgs.msg)}"`)
+);
+bot.onText(/\/list/, (msg: TelegramMessage) =>
+  bot.sendMessage(msg.chat.id, `список "${JSON.stringify(spamKeywords)}"`)
+);
+bot.onText(/\/logs/, (msg: TelegramMessage) =>
+  bot.sendMessage(
+    msg.chat.id,
+    `logs "${JSON.stringify(spamLogs)}" ${spamLogs.length}`
   )
 );
 
-bot.onText(/\/add (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const newKeyword = match[1].toLowerCase();
+bot.onText(
+  /\/add (.+)/,
+  async (msg: TelegramMessage, match: RegExpMatchArray) => {
+    if (!match) return;
+    const chatId = msg.chat.id;
+    const newKeyword = match[1].toLowerCase();
 
-  bot.getChatMember(chatId, userId).then((member) => {
-    if (member.user.id == MY_TG_ID) {
+    const member = await bot.getChatMember(chatId, msg.from.id);
+    console.log("member", member.user.id, MY_TG_ID);
+    if (member.user.id === MY_TG_ID) {
       spamKeywords.words.push(newKeyword);
       saveKeywords();
       bot.sendMessage(
@@ -79,17 +151,20 @@ bot.onText(/\/add (.+)/, (msg, match) => {
         "Извините, эта команда доступна только администраторам."
       );
     }
-  });
-});
-bot.onText(/\/addmsg (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const newMsg = match[1].toLowerCase();
+  }
+);
 
-  bot.getChatMember(chatId, userId).then((member) => {
-    if (member.user.id == MY_TG_ID) {
+bot.onText(
+  /\/addmsg (.+)/,
+  async (msg: TelegramMessage, match: RegExpMatchArray) => {
+    if (!match) return;
+    const chatId = msg.chat.id;
+    const newMsg = match[1].toLowerCase();
+
+    const member = await bot.getChatMember(chatId, msg.from.id);
+    if (member.user.id === MY_TG_ID) {
       spamMsgs.msg.push(newMsg);
-      saveMsgs(); // save spam msg
+      saveMsgs();
       bot.sendMessage(
         chatId,
         `Ключевое СООБЩЕНИЕ "${newMsg}" было добавлено в список блокировки.`
@@ -100,15 +175,18 @@ bot.onText(/\/addmsg (.+)/, (msg, match) => {
         "Извините, эта команда доступна только администраторам."
       );
     }
-  });
-});
-bot.onText(/\/remove (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const keywordToRemove = match[1].toLowerCase();
+  }
+);
 
-  bot.getChatMember(chatId, userId).then((member) => {
-    if (member.user.id == MY_TG_ID) {
+bot.onText(
+  /\/remove (.+)/,
+  async (msg: TelegramMessage, match: RegExpMatchArray) => {
+    if (!match) return;
+    const chatId = msg.chat.id;
+    const keywordToRemove = match[1].toLowerCase();
+
+    const member = await bot.getChatMember(chatId, msg.from.id);
+    if (member.user.id === MY_TG_ID) {
       const index = spamKeywords.words.indexOf(keywordToRemove);
       if (index !== -1) {
         spamKeywords.words.splice(index, 1);
@@ -129,106 +207,63 @@ bot.onText(/\/remove (.+)/, (msg, match) => {
         "Извините, эта команда доступна только администраторам."
       );
     }
-  });
-});
+  }
+);
 
-type telegramMessage = {
-  chat: {
-    id: number;
-  };
-  from: {
-    id: number;
-    username: string;
-  };
-  text: string;
-};
-const bannUser = (bot, msg: telegramMessage) => {
-  bot.sendMessage(
-    msg.chat.id,
-    `Пользователь ${msg.from.username} был заблокирован за спам.`
-  );
-  spamKeywords.countOfbannedAI = (spamKeywords.countOfbannedAI || 0) + 1;
-  spamLogs.push({ user: msg.from, msg: msg.text } as never);
-  saveKeywords();
-  saveLogs(spamLogs);
-  axios
-    .get("https://api.telegram.org/bot" + token + "/sendMessage", {
-      params: {
-        chat_id: MY_TG_ID,
-        text: "BaNN USER: " + JSON.stringify(msg.from) + "\n " + msg.text,
-      },
-    })
-    .then(function (response) {
-      console.log("OK");
-    })
-    .catch(function (error) {
-      console.log(error);
-    })
-    .finally(function () {
-      // always executed
-    });
-  //axios.sendMessage('https://api.telegram.org/bot7363518040:AAG415iNi8127l2tCIw7zaFV73J8CVf2G5o/sendMessage?chat_id=314044882&text=test!!!');
-};
+// Handler for incoming messages
+bot.on("message", async (msg: TelegramMessage) => {
+  if (!msg.text || msg.text[0] === "/") {
+    console.error("admin comand skipped", msg.text);
+    return;
+  }
 
-bot.on("message", async (msg) => {
-  console.log(msg);
-  if (msg.text) {
-    const messageText = msg.text.toLowerCase();
-    const userId = msg.from.id;
-    const chatId = msg.chat.id;
-    console.log("from TG: ", userId, chatId, msg);
-    // Check if message is spam using Groq AI
-    try {
-      const chatCompletion = await getGroqChatCompletion(msg.text);
+  const messageText = msg.text;
+  const userId = msg.from.id;
+  const chatId = msg.chat.id;
 
-      const response = chatCompletion.choices[0]?.message?.content || "";
-      console.log("AI response: ", response);
-      if (msg.from.id == MY_TG_ID) {
-        console.log("IM ADMIN! fake DELETE AND NO BANN ", userId, messageText);
-        bot.deleteMessage(chatId, msg.message_id);
-      } else {
-        if (response == "is_spam") {
-          console.log("SPAM!");
-          // Delete and log spam message if Groq AI detects spam
-          bot
-            .deleteMessage(chatId, msg.message_id)
-            .then(() => {
-              if (userId != MY_TG_ID) {
-                bot
-                  .restrictChatMember(chatId, userId, {
-                    permissions: { can_send_messages: false },
-                  })
-                  .then(() => bannUser(bot, msg));
-              }
-            })
-            .catch((err) => console.log(err));
-        }
+  //console.log("from TG: ", userId, chatId, msg);
+
+  try {
+    const chatCompletion = await getGroqChatCompletion(msg.text);
+    const response = chatCompletion.choices[0]?.message?.content || "";
+    console.log("AI response: ", response);
+    if (msg.from.id === MY_TG_ID && response === "is_spam") {
+      console.log("IM ADMIN! fake DELETE AND NO BANN::: ", messageText);
+      await bot.deleteMessage(chatId, msg.message_id);
+    } else if (response === "is_spam") {
+      console.log("SPAM!");
+      await bot.deleteMessage(chatId, msg.message_id);
+      if (userId !== MY_TG_ID) {
+        await bot.restrictChatMember(chatId, userId, {
+          permissions: { can_send_messages: false },
+        });
+        bannUser(msg);
       }
-    } catch (error) {
-      console.log("Error checking spam:", error);
     }
-  } else {
-    console.error("Wrong tg answer", msg);
+  } catch (error) {
+    console.log("Error checking spam:", error);
   }
 });
 
-async function getGroqChatCompletion(msg) {
+// Function to get a chat completion from the Groq AI
+async function getGroqChatCompletion(msg: string) {
   const aiParams = {
     messages: [
       {
         role: "system",
         content: `You are an anti-spam assistant in a group about fishing tours. Analyze each message carefully and respond **only** with either "is_spam" or "is_no_spam" without any additional characters.
-    
-    If the message contains any information about fishing (such as fishing locations, techniques, equipment), you should respond with "is_no_spam". 
-    
-    The group supports both Russian and English languages. Messages with content like "passive income," "remote earnings," or "get paid with minimal effort" are considered spam. 
-    
-    Check for similar phrases in Russian. Here are some examples of spam messages:
-    ${spamMsgs.msg.join("\n")}
-    
-    Use the following spam keywords to help identify spam messages: ${JSON.stringify(
-      spamKeywords
-    )}.`,
+
+        If the message contains any information about fishing (such as fishing locations, techniques, equipment), you should respond with "is_no_spam". 
+        
+        The group supports both Russian and English languages. Messages with content like "passive income," "remote earnings," or "get paid with minimal effort" are considered spam. 
+        
+        Check for similar phrases in Russian. Here are some examples of spam messages: ${spamMsgs.msg.join(
+          "\n"
+        )}
+        
+        Use the following spam keywords to help identify spam keywords: ${JSON.stringify(
+          spamKeywords.words
+        )}.`,
       },
       { role: "user", content: msg },
     ],
@@ -238,14 +273,10 @@ async function getGroqChatCompletion(msg) {
   return groq.chat.completions.create(aiParams);
 }
 
+// Main function to load required data and start bot
 async function main() {
-  loadKeywords();
-  loadLogs();
-  //const chatCompletion = await getGroqChatCompletion('Продам гараж, пишите в личку.');
-  // Print the completion returned by the LLM.
-  //console.log(chatCompletion.choices[0]?.message?.content || "");
-  // Print the completion returned by the LLM.
-  //console.log(chatCompletion.choices[0]?.message?.content || "");
+  await loadKeywords();
+  await loadLogs();
 }
 
 main();
