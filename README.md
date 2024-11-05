@@ -34,10 +34,14 @@ This project is a Telegram bot designed to help manage spam in a group about fis
 
 ## Running the Server
 
-To start the bot, run:
-
+To compile, run:
 ```bash
-node server.js
+npx tsc
+```
+
+To start the bot, run:
+```bash
+node dist/server.js
 ```
 
 ## Bot Commands
