@@ -274,6 +274,7 @@ export class TelegramAntiSpamBot {
     }
   }
   */
+  /*
   async handleTelegramWebhook(request: Request) {
     try {
       // Получаем объект Update из Telegram с явной типизацией
@@ -295,6 +296,61 @@ export class TelegramAntiSpamBot {
           JSON.stringify(msg, null, 2)
         );
         return new Response("No msg.from.id in message", { status: 200 });
+      }
+
+      await this.loadState();
+
+      // Если это команда
+      if (msg.text && msg.text.startsWith("/")) {
+        return await this.handleTelegramCommand(msg);
+      }
+
+      // Антиспам логика
+      const chatCompletion = (await this.getGroqChatCompletion(msg.text)) as {
+        choices?: { message?: { content?: string } }[];
+      };
+      const response = chatCompletion.choices?.[0]?.message?.content || "";
+      console.log("Message from:", msg.from, "AI response:", response);
+
+      if (response === "is_spam") {
+        await this.deleteTelegramMessage(msg.chat.id, msg.message_id);
+        if (msg.from.id === this.MY_TG_ID) {
+          return new Response("Admin spam deleted", { status: 200 });
+        } else {
+          await this.restrictTelegramUser(msg.chat.id, msg.from.id);
+          await this.banUser(msg);
+          return new Response("Spam deleted and user banned", { status: 200 });
+        }
+      }
+
+      return new Response("No spam", { status: 200 });
+    } catch (err: any) {
+      console.error("Error in handleTelegramWebhook:", err);
+      return new Response("Error processing webhook", { status: 500 });
+    }
+  }
+    */
+  async handleTelegramWebhook(request: Request): Promise<Response> {
+    try {
+      // Получаем объект Update из Telegram
+      const update: TelegramUpdate = await request.json();
+      console.log("Received update:", JSON.stringify(update, null, 2));
+
+      // Проверяем, есть ли в обновлении сообщение
+      if (!update.message) {
+        console.log("No message in update, skipping.");
+        return new Response("No message in update", { status: 200 });
+      }
+
+      const msg: TelegramMessage = update.message;
+
+      // Проверяем наличие msg.from
+      if (!msg.from || !msg.from.id) {
+        console.log(
+          "No msg.from or msg.from.id in message:",
+          JSON.stringify(msg, null, 2)
+        );
+        return new Response("No msg.from.id in message", { status: 400 });
       }
 
       await this.loadState();
