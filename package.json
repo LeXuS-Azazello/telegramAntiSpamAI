@@ -2,7 +2,7 @@
   "name": "TelegramAntispamAI",
   "version": "1.0.0",
   "description": "",
-  "main": "worker.ts",
+  "main": "worker.js",
   "scripts": {
     "build": "tsc",
     "start": "wrangler dev"
