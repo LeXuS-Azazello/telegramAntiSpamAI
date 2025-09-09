@@ -12,7 +12,7 @@ routes = [
 
 [vars]
   TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"
-  MY_TG_ID = "your-admin-id"
+  MY_TG_ID = 314044882
   GROQ_API_KEY = "your-groq-api-key"
 
 [[kv_namespaces]]

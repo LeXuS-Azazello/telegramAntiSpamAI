@@ -66,7 +66,7 @@ export class TelegramAntiSpamBot {
     }
 
     this.TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
-    this.MY_TG_ID = Number(env.MY_TG_ID);
+    this.MY_TG_ID = Number(env.MY_TG_ID); // Ensure MY_TG_ID is a number
     this.GROQ_API_KEY = env.GROQ_API_KEY;
 
     this.spamKeywords = {
@@ -87,7 +87,7 @@ export class TelegramAntiSpamBot {
         "Хoчeшь пaccивный дoxод? Нaпиши мнe + и я тeбe рaccкaжу кaк yдлaённo пoлучaть дoxод с минимaльными yсилиями Ждy в л.c.p.",
         "Приветствую,предоставляю возможность удаленного заработка.Опыт не требуются обучаем всему с нуля .Доход от 60 000р за семь дней.За деталями пишите мне в личные сообщения",
         "Гибкий график, удалённо 7000р в день. 18+",
-        "Нужны 2-3 человека (18+) для удаленной деятельности от 70-100$ в день. Заинтересованных прошу писать ➕ в личныe cooбщeниe.",
+        "Нужны 2-3 человека (18+) для удаленной деятельности от 70-100$ в день. Заинтересованных прошу писать ➕  в личныe cooбщeниe.",
       ],
       countOfbanned: 0,
     };
@@ -213,6 +213,9 @@ export class TelegramAntiSpamBot {
 
   async sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
     try {
+      console.log(
+        `Attempting to send message to chatId: ${chatId}, text: ${text}`
+      );
       const response = await fetch(
         `https://api.telegram.org/bot${this.TELEGRAM_BOT_TOKEN}/sendMessage`,
         {
@@ -242,6 +245,9 @@ export class TelegramAntiSpamBot {
     messageId: number
   ): Promise<boolean> {
     try {
+      console.log(
+        `Attempting to delete message ${messageId} in chat ${chatId}`
+      );
       const response = await fetch(
         `https://api.telegram.org/bot${this.TELEGRAM_BOT_TOKEN}/deleteMessage`,
         {
@@ -273,6 +279,7 @@ export class TelegramAntiSpamBot {
 
   async restrictTelegramUser(chatId: number, userId: number): Promise<boolean> {
     try {
+      console.log(`Attempting to restrict user ${userId} in chat ${chatId}`);
       const response = await fetch(
         `https://api.telegram.org/bot${this.TELEGRAM_BOT_TOKEN}/restrictChatMember`,
         {
@@ -309,7 +316,20 @@ export class TelegramAntiSpamBot {
 
     // Send notification to the user before banning
     const banMessage = `Ваше сообщение было классифицировано как спам и удалено: "${msg.text}".\nПричина: Сообщение содержит спам (например, рекламу пассивного дохода или удалённой работы). Пожалуйста, воздержитесь от подобных сообщений.`;
-    await this.sendTelegramMessage(msg.from.id, banMessage);
+    let notificationSent = await this.sendTelegramMessage(
+      msg.from.id,
+      banMessage
+    );
+    if (!notificationSent) {
+      // Fallback to group chat
+      console.log(
+        `Falling back to group chat ${msg.chat.id} for ban notification`
+      );
+      notificationSent = await this.sendTelegramMessage(
+        msg.chat.id,
+        banMessage
+      );
+    }
 
     // Increment ban counter and log the ban
     this.spamKeywords.countOfbannedAI += 1;
@@ -322,12 +342,10 @@ export class TelegramAntiSpamBot {
     await this.saveState();
 
     // Notify admin
-    await this.sendTelegramMessage(
-      this.MY_TG_ID,
-      `BaNN USER: ${JSON.stringify(msg.from)}\nMessage: ${
-        msg.text
-      }\nReason: Detected as spam`
-    );
+    const adminMessage = `BANNED USER: ${JSON.stringify(msg.from)}\nMessage: ${
+      msg.text
+    }\nReason: Detected as spam\nNotification sent: ${notificationSent}`;
+    await this.sendTelegramMessage(this.MY_TG_ID, adminMessage);
   }
 
   async handleTelegramCommand(msg: TelegramMessage): Promise<Response> {
@@ -337,7 +355,7 @@ export class TelegramAntiSpamBot {
       const isAdmin = msg.from?.id === this.MY_TG_ID;
 
       console.log(
-        `Processing command: ${text} from user ${msg.from?.id} (isAdmin: ${isAdmin})`
+        `Processing command: ${text} from user ${msg.from?.id} (isAdmin: ${isAdmin}) in chat ${chatId}`
       );
 
       if (text === "/start") {
@@ -525,6 +543,7 @@ export class TelegramAntiSpamBot {
 
       // Если это команда
       if (msg.text && msg.text.startsWith("/")) {
+        console.log(`Handling command: ${msg.text} from user ${msg.from.id}`);
         return await this.handleTelegramCommand(msg);
       }
 
