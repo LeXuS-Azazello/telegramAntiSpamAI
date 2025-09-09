@@ -193,7 +193,7 @@ export class TelegramAntiSpamBot {
         },
         { role: "user", content: msg },
       ],
-      model: "gpt-3.5-turbo",
+      model: "groq/llama-3.1-70b-chat",
     };
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
