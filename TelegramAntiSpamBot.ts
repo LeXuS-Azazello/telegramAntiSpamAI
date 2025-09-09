@@ -177,10 +177,10 @@ export class TelegramAntiSpamBot {
         "INSERT INTO spam_logs (user_id, username, msg, timestamp) VALUES (?, ?, ?, ?)"
       )
         .bind(
-          lastLog.user.id,
-          lastLog.user.username,
-          lastLog.msg,
-          lastLog.timestamp
+          lastLog.user.id || "0",
+          lastLog.user.username || "",
+          lastLog.msg || "",
+          lastLog.timestamp || 0
         )
         .run();
     }
@@ -274,19 +274,24 @@ export class TelegramAntiSpamBot {
       choices?: { message?: { content?: string } }[];
     };
     const response = chatCompletion.choices?.[0]?.message?.content || "";
-
-    if (msg.from.id === this.MY_TG_ID && response === "is_spam") {
-      await this.deleteTelegramMessage(msg.chat.id, msg.message_id);
-      return new Response("Admin spam deleted", { status: 200 });
-    } else if (response === "is_spam") {
-      await this.deleteTelegramMessage(msg.chat.id, msg.message_id);
-      if (msg.from.id !== this.MY_TG_ID) {
-        await this.restrictTelegramUser(msg.chat.id, msg.from.id);
-        await this.banUser(msg);
+    console.log("msg from", msg);
+    if (!msg.from.id) {
+      console.log("msg.from", msg.from);
+      return new Error("No msg.from.id telegram");
+    } else {
+      if (msg.from.id === this.MY_TG_ID && response === "is_spam") {
+        await this.deleteTelegramMessage(msg.chat.id, msg.message_id);
+        return new Response("Admin spam deleted", { status: 200 });
+      } else if (response === "is_spam") {
+        await this.deleteTelegramMessage(msg.chat.id, msg.message_id);
+        if (msg.from.id !== this.MY_TG_ID) {
+          await this.restrictTelegramUser(msg.chat.id, msg.from.id);
+          await this.banUser(msg);
+        }
+        return new Response("Spam deleted and user banned", { status: 200 });
       }
-      return new Response("Spam deleted and user banned", { status: 200 });
+      return new Response("No spam", { status: 200 });
     }
-    return new Response("No spam", { status: 200 });
   }
 
   async deleteTelegramMessage(chatId: number, messageId: number) {
@@ -331,118 +336,123 @@ export class TelegramAntiSpamBot {
   }
 
   async handleTelegramCommand(msg: TelegramMessage): Promise<Response> {
-    const chatId = msg.chat.id;
-    const text = msg.text || "";
-    const isAdmin = msg.from.id === this.MY_TG_ID;
+    try {
+      const chatId = msg.chat.id;
+      const text = msg.text || "";
+      const isAdmin = msg.from.id === this.MY_TG_ID;
 
-    if (text === "/start") {
-      await this.sendTelegramMessage(
-        chatId,
-        "Привет! Я твой рыбо анти-спам бот."
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    if (text === "/listmsg") {
-      await this.sendTelegramMessage(
-        chatId,
-        `список msg: "${JSON.stringify(this.spamMsgs.msg)}"`
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    if (text === "/list") {
-      await this.sendTelegramMessage(
-        chatId,
-        `список "${JSON.stringify(this.spamKeywords)}"`
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    if (text === "/logs") {
-      await this.sendTelegramMessage(
-        chatId,
-        `logs "${JSON.stringify(this.spamLogs)}" ${this.spamLogs.length}`
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    // /add <keyword>
-    const addMatch = text.match(/^\/add (.+)$/);
-    if (addMatch) {
-      if (isAdmin) {
-        const newKeyword = addMatch[1].toLowerCase();
-        this.spamKeywords.words.push(newKeyword);
-        await this.env.SPAM_KEYWORDS.put(
-          "keywords",
-          JSON.stringify(this.spamKeywords)
-        );
+      if (text === "/start") {
         await this.sendTelegramMessage(
           chatId,
-          `Ключевое слово "${newKeyword}" было добавлено в список блокировки.`
+          "Привет! Я твой рыбо анти-спам бот."
         );
-      } else {
-        await this.sendTelegramMessage(
-          chatId,
-          "Извините, эта команда доступна только администраторам."
-        );
+        return new Response("OK", { status: 200 });
       }
-      return new Response("OK", { status: 200 });
-    }
 
-    // /addmsg <msg>
-    const addMsgMatch = text.match(/^\/addmsg (.+)$/);
-    if (addMsgMatch) {
-      if (isAdmin) {
-        const newMsg = addMsgMatch[1].toLowerCase();
-        this.spamMsgs.msg.push(newMsg);
-        await this.env.SPAM_MSGS.put("msgs", JSON.stringify(this.spamMsgs));
+      if (text === "/listmsg") {
         await this.sendTelegramMessage(
           chatId,
-          `Ключевое СООБЩЕНИЕ "${newMsg}" было добавлено в список блокировки.`
+          `список msg: "${JSON.stringify(this.spamMsgs.msg)}"`
         );
-      } else {
-        await this.sendTelegramMessage(
-          chatId,
-          "Извините, эта команда доступна только администраторам."
-        );
+        return new Response("OK", { status: 200 });
       }
-      return new Response("OK", { status: 200 });
-    }
 
-    // /remove <keyword>
-    const removeMatch = text.match(/^\/remove (.+)$/);
-    if (removeMatch) {
-      if (isAdmin) {
-        const keywordToRemove = removeMatch[1].toLowerCase();
-        const index = this.spamKeywords.words.indexOf(keywordToRemove);
-        if (index !== -1) {
-          this.spamKeywords.words.splice(index, 1);
+      if (text === "/list") {
+        await this.sendTelegramMessage(
+          chatId,
+          `список "${JSON.stringify(this.spamKeywords)}"`
+        );
+        return new Response("OK", { status: 200 });
+      }
+
+      if (text === "/logs") {
+        await this.sendTelegramMessage(
+          chatId,
+          `logs "${JSON.stringify(this.spamLogs)}" ${this.spamLogs.length}`
+        );
+        return new Response("OK", { status: 200 });
+      }
+
+      // /add <keyword>
+      const addMatch = text.match(/^\/add (.+)$/);
+      if (addMatch) {
+        if (isAdmin) {
+          const newKeyword = addMatch[1].toLowerCase();
+          this.spamKeywords.words.push(newKeyword);
           await this.env.SPAM_KEYWORDS.put(
             "keywords",
             JSON.stringify(this.spamKeywords)
           );
           await this.sendTelegramMessage(
             chatId,
-            `Ключевое слово "${keywordToRemove}" было удалено из списка блокировки.`
+            `Ключевое слово "${newKeyword}" было добавлено в список блокировки.`
           );
         } else {
           await this.sendTelegramMessage(
             chatId,
-            `Ключевое слово "${keywordToRemove}" не найдено в списке блокировки.`
+            "Извините, эта команда доступна только администраторам."
           );
         }
-      } else {
-        await this.sendTelegramMessage(
-          chatId,
-          "Извините, эта команда доступна только администраторам."
-        );
+        return new Response("OK", { status: 200 });
       }
-      return new Response("OK", { status: 200 });
-    }
 
-    // Если команда не распознана
-    await this.sendTelegramMessage(chatId, "Неизвестная команда.");
-    return new Response("Unknown command", { status: 200 });
+      // /addmsg <msg>
+      const addMsgMatch = text.match(/^\/addmsg (.+)$/);
+      if (addMsgMatch) {
+        if (isAdmin) {
+          const newMsg = addMsgMatch[1].toLowerCase();
+          this.spamMsgs.msg.push(newMsg);
+          await this.env.SPAM_MSGS.put("msgs", JSON.stringify(this.spamMsgs));
+          await this.sendTelegramMessage(
+            chatId,
+            `Ключевое СООБЩЕНИЕ "${newMsg}" было добавлено в список блокировки.`
+          );
+        } else {
+          await this.sendTelegramMessage(
+            chatId,
+            "Извините, эта команда доступна только администраторам."
+          );
+        }
+        return new Response("OK", { status: 200 });
+      }
+
+      // /remove <keyword>
+      const removeMatch = text.match(/^\/remove (.+)$/);
+      if (removeMatch) {
+        if (isAdmin) {
+          const keywordToRemove = removeMatch[1].toLowerCase();
+          const index = this.spamKeywords.words.indexOf(keywordToRemove);
+          if (index !== -1) {
+            this.spamKeywords.words.splice(index, 1);
+            await this.env.SPAM_KEYWORDS.put(
+              "keywords",
+              JSON.stringify(this.spamKeywords)
+            );
+            await this.sendTelegramMessage(
+              chatId,
+              `Ключевое слово "${keywordToRemove}" было удалено из списка блокировки.`
+            );
+          } else {
+            await this.sendTelegramMessage(
+              chatId,
+              `Ключевое слово "${keywordToRemove}" не найдено в списке блокировки.`
+            );
+          }
+        } else {
+          await this.sendTelegramMessage(
+            chatId,
+            "Извините, эта команда доступна только администраторам."
+          );
+        }
+        return new Response("OK", { status: 200 });
+      }
+
+      // Если команда не распознана
+      await this.sendTelegramMessage(chatId, "Неизвестная команда.");
+      return new Response("Unknown command", { status: 200 });
+    } catch (err: any) {
+      console.error(err);
+      return new Response(err);
+    }
   }
 }
