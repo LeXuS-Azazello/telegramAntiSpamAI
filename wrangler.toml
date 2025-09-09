@@ -16,12 +16,12 @@ routes = [
   GROQ_API_KEY = "your-groq-api-key"
 
 [[kv_namespaces]]
-  binding = "KV_BINDING"
-  id = "6a4045d7cde44272a4305756bd6eb223"
-
-[[kv_namespaces]]
   binding = "SPAM_KEYWORDS"
   id = "8610434c40e448c5aa810a24fab333fc"
+
+[[kv_namespaces]]
+  binding = "SPAM_MSGS"
+  id = "6a4045d7cde44272a4305756bd6eb223"
 
 [[d1_databases]]
   binding = "DB"
