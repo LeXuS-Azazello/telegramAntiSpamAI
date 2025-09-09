@@ -1,7 +1,6 @@
-name = "telegram-antispam-worker"
+name = "telegramantispamai"
 main = "worker.ts"
 compatibility_date = "2024-06-01"
-workers_dev = false
 
 [vars]
 TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"
