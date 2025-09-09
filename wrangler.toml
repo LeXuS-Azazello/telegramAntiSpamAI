@@ -1,0 +1,24 @@
+name = "telegram-antispam-worker"
+main = "worker.ts"
+compatibility_date = "2024-06-01"
+workers_dev = true
+
+[vars]
+TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"
+MY_TG_ID = "your-admin-id"
+GROQ_API_KEY = "your-groq-api-key"
+
+[[kv_namespaces]]
+binding = "KV_BINDING"
+id = "6a4045d7cde44272a4305756bd6eb223"
+
+[[kv_namespaces]]
+binding = "SPAM_KEYWORDS"
+id = "8610434c40e448c5aa810a24fab333fc"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tg_antispam_db"
+database_id = "13f3a442-4e62-4d91-b6b1-9bd48b9f95f8"
+
+
