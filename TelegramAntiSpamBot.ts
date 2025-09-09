@@ -33,6 +33,7 @@ export class TelegramAntiSpamBot {
   private TELEGRAM_BOT_TOKEN: string;
   private MY_TG_ID: number;
   private GROQ_API_KEY: string;
+  private AI_MODEL: string;
   private env: any;
 
   private spamKeywords: SpamKeywordData;
@@ -64,10 +65,14 @@ export class TelegramAntiSpamBot {
     if (!env.DB) {
       throw new Error("Missing env.DB (D1 database binding)");
     }
+    if (!env.AI_MODEL) {
+      throw new Error("Missing env.AI_MODEL (ai model not set binding)");
+    }
 
     this.TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
     this.MY_TG_ID = Number(env.MY_TG_ID); // Ensure MY_TG_ID is a number
     this.GROQ_API_KEY = env.GROQ_API_KEY;
+    this.AI_MODEL = env.AI_MODEL;
 
     this.spamKeywords = {
       words: [
@@ -193,7 +198,7 @@ export class TelegramAntiSpamBot {
         },
         { role: "user", content: msg },
       ],
-      model: "groq/llama-3.1-70b-chat",
+      model: this.AI_MODEL || "groq/llama-3.1-8b",
     };
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
