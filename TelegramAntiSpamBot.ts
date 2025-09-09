@@ -275,7 +275,7 @@ export class TelegramAntiSpamBot {
     };
     const response = chatCompletion.choices?.[0]?.message?.content || "";
     console.log("msg from", msg);
-    if (!msg.from.id) {
+    if (!msg.from || !msg.from.id) {
       console.log("msg.from", msg.from);
       return new Error("No msg.from.id telegram");
     } else {
