@@ -15,7 +15,7 @@ This project is a Telegram bot for managing spam in fishing tour groups. It uses
 
    ```bash
    git clone <repository_url>
-   cd telegramAntiSpam/telegramAntiSpam
+   cd telegramAntiSpam
    ```
 
 2. **Configure Cloudflare Worker**
@@ -76,7 +76,7 @@ This project is a Telegram bot for managing spam in fishing tour groups. It uses
 - Ensure all environment variables and bindings are set correctly in `wrangler.toml`.
 - Make sure your Telegram webhook URL is correct and publicly accessible.
 
-````<!-- filepath: /home/lexus/projects/telegramBots/telegramAntispam/telegramAntiSpam/README.md -->
+````
 # Telegram Anti-Spam Bot (Cloudflare Worker)
 
 This project is a Telegram bot for managing spam in fishing tour groups. It uses Groq AI for spam detection and is designed to run on Cloudflare Workers with KV and D1 for persistent storage.
@@ -94,7 +94,7 @@ This project is a Telegram bot for managing spam in fishing tour groups. It uses
 
    ```bash
    git clone <repository_url>
-   cd telegramAntiSpam/telegramAntiSpam
+   cd telegramAntiSpam
 ````
 
 2. **Configure Cloudflare Worker**
@@ -118,12 +118,6 @@ This project is a Telegram bot for managing spam in fishing tour groups. It uses
 
    ```
    https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<your-worker-url>
-   ```
-
-   Example:
-
-   ```
-   https://api.telegram.org/bot123456:ABC-DEF1234ghIklmno/setWebhook?url=https://telegram-antispam-worker.your-domain.workers.dev
    ```
 
 ## How It Works
