@@ -240,7 +240,9 @@ export class TelegramAntiSpamBot {
     }
     await this.loadState();
 
-    const chatCompletion = await this.getGroqChatCompletion(msg.text);
+    const chatCompletion = await this.getGroqChatCompletion(msg.text) as {
+      choices?: { message?: { content?: string } }[];
+    };
     const response = chatCompletion.choices?.[0]?.message?.content || "";
 
     if (msg.from.id === this.MY_TG_ID && response === "is_spam") {
@@ -266,7 +268,10 @@ export class TelegramAntiSpamBot {
     }
 
     // ...антиспам логика...
-    const chatCompletion = await this.getGroqChatCompletion(msg.text);
+    //const chatCompletion = await this.getGroqChatCompletion(msg.text);
+    const chatCompletion = (await this.getGroqChatCompletion(msg.text)) as {
+      choices?: { message?: { content?: string } }[];
+    };
     const response = chatCompletion.choices?.[0]?.message?.content || "";
 
     if (msg.from.id === this.MY_TG_ID && response === "is_spam") {
