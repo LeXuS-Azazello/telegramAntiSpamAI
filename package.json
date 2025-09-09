@@ -1,11 +1,16 @@
 {
   "name": "TelegramAntispamAI",
   "version": "1.0.0",
+  "description": "",
   "main": "worker.ts",
-  "scripts": {},
+  "scripts": {
+    "build": "tsc",
+    "start": "wrangler dev"
+  },
+  "author": "",
+  "license": "ISC",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250909.0",
-    "wrangler": "^4.34.0",
-    "typescript": "^5.0.0"
+    "wrangler": "^4.34.0"
   }
 }
