@@ -330,10 +330,12 @@ export class TelegramAntiSpamBot {
       console.log(
         `Falling back to group chat ${msg.chat.id} for ban notification`
       );
+      /*
       notificationSent = await this.sendTelegramMessage(
         msg.chat.id,
         banMessage
       );
+      */
     }
 
     // Increment ban counter and log the ban
