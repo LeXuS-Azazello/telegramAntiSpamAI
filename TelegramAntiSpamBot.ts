@@ -1,7 +1,9 @@
+import { Buffer } from "buffer";
 export interface SpamKeywordData {
   words: string[];
   countOfbanned: number;
   countOfbannedAI: number;
+  countOfbannedImage: number; // New counter for image-based bans
 }
 
 export interface SpamMsgsData {
@@ -12,8 +14,15 @@ export interface SpamMsgsData {
 export interface TelegramMessage {
   chat: { id: number };
   from?: { id: number; username: string };
-  text: string;
+  text?: string;
   message_id: number;
+  photo?: Array<{
+    file_id: string;
+    file_size?: number;
+    width: number;
+    height: number;
+  }>;
+  caption?: string; // Caption for photos
 }
 
 export interface TelegramUpdate {
@@ -27,6 +36,7 @@ export interface SpamLog {
   user: { id: number; username: string };
   msg: string;
   timestamp: number;
+  file_id?: string; // New field for image file_id
 }
 
 export class TelegramAntiSpamBot {
@@ -84,6 +94,7 @@ export class TelegramAntiSpamBot {
       ],
       countOfbanned: 0,
       countOfbannedAI: 0,
+      countOfbannedImage: 0, // Initialize new counter
     };
     this.spamMsgs = {
       msg: [
@@ -100,7 +111,7 @@ export class TelegramAntiSpamBot {
   }
 
   async ensureDbAndKvInitialized() {
-    // D1: создать таблицу, если не существует
+    // D1: create table if not exists, add file_id column if missing
     await this.env.DB.prepare(
       `
       CREATE TABLE IF NOT EXISTS spam_logs (
@@ -108,12 +119,13 @@ export class TelegramAntiSpamBot {
         user_id INTEGER,
         username TEXT,
         msg TEXT,
-        timestamp INTEGER
+        timestamp INTEGER,
+        file_id TEXT
       )
     `
     ).run();
 
-    // KV: начальные данные для spamKeywords
+    // KV: initial data for spamKeywords
     const keywords = await this.env.SPAM_KEYWORDS.get("keywords");
     if (!keywords) {
       await this.env.SPAM_KEYWORDS.put(
@@ -122,84 +134,171 @@ export class TelegramAntiSpamBot {
       );
     }
 
-    // KV: начальные данные для spamMsgs
+    // KV: initial data for spamMsgs
     const msgs = await this.env.SPAM_MSGS.get("msgs");
     if (!msgs) {
       await this.env.SPAM_MSGS.put("msgs", JSON.stringify(this.spamMsgs));
+    }
+
+    // KV: initialize image cache if not exists
+    const cache = await this.env.SPAM_KEYWORDS.get("image_cache");
+    if (!cache) {
+      await this.env.SPAM_KEYWORDS.put("image_cache", JSON.stringify({}));
     }
   }
 
   async loadState() {
     await this.ensureDbAndKvInitialized();
 
-    // KV: ключевые слова
+    // KV: keywords
     const keywords = await this.env.SPAM_KEYWORDS.get("keywords");
     if (keywords) this.spamKeywords = JSON.parse(keywords);
 
-    // KV: сообщения
+    // KV: messages
     const msgs = await this.env.SPAM_MSGS.get("msgs");
     if (msgs) this.spamMsgs = JSON.parse(msgs);
 
-    // D1: логи
+    // KV: image cache
+    const cacheStr = await this.env.SPAM_KEYWORDS.get("image_cache");
+    if (cacheStr) {
+      // Clean expired cache entries (older than 1 hour)
+      const cache = JSON.parse(cacheStr);
+      const now = Date.now();
+      Object.keys(cache).forEach((key) => {
+        if (now - cache[key].timestamp > 3600000) {
+          // 1 hour in ms
+          delete cache[key];
+        }
+      });
+      await this.env.SPAM_KEYWORDS.put("image_cache", JSON.stringify(cache));
+    }
+
+    // D1: logs
     const logsRes = await this.env.DB.prepare(
-      "SELECT user_id, username, msg, timestamp FROM spam_logs ORDER BY timestamp DESC LIMIT 100"
+      "SELECT user_id, username, msg, timestamp, file_id FROM spam_logs ORDER BY timestamp DESC LIMIT 100"
     ).all();
     this.spamLogs = logsRes.results.map((row: any) => ({
       user: { id: row.user_id, username: row.username },
       msg: row.msg,
       timestamp: row.timestamp,
+      file_id: row.file_id,
     }));
   }
 
   async saveState() {
-    // KV: ключевые слова
+    // KV: keywords
     await this.env.SPAM_KEYWORDS.put(
       "keywords",
       JSON.stringify(this.spamKeywords)
     );
 
-    // KV: сообщения
+    // KV: messages
     await this.env.SPAM_MSGS.put("msgs", JSON.stringify(this.spamMsgs));
 
-    // D1: логи (добавляем только новые записи)
+    // D1: logs (add only new records)
     if (this.spamLogs.length > 0) {
       const lastLog = this.spamLogs[this.spamLogs.length - 1];
       await this.env.DB.prepare(
-        "INSERT INTO spam_logs (user_id, username, msg, timestamp) VALUES (?, ?, ?, ?)"
+        "INSERT INTO spam_logs (user_id, username, msg, timestamp, file_id) VALUES (?, ?, ?, ?, ?)"
       )
         .bind(
           lastLog.user.id || 0,
           lastLog.user.username || "",
           lastLog.msg || "",
-          lastLog.timestamp || 0
+          lastLog.timestamp || 0,
+          lastLog.file_id || null
         )
         .run();
     }
   }
 
-  async getGroqChatCompletion(msg: string) {
-    const aiParams = {
-      messages: [
-        {
-          role: "system",
-          content: `You are an anti-spam assistant in a group about fishing tours. Analyze each message carefully and respond **only** with either "is_spam" or "is_no_spam" without any additional characters.
+  // New method: Get Telegram file path by file_id
+  private async getTelegramFilePath(fileId: string): Promise<string | null> {
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/bot${this.TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`
+      );
+      const result: any = await response.json(); // Explicitly typing result as 'any' to handle JSON response
+      if (result.ok) {
+        return result.result.file_path;
+      }
+      console.error("Failed to get file path:", result);
+      return null;
+    } catch (err) {
+      console.error("Error getting file path:", err);
+      return null;
+    }
+  }
 
-          If the message contains any information about fishing (such as fishing locations, techniques, equipment), you should respond with "is_no_spam". 
-          
-          The group supports both Russian and English languages. Messages with content like "passive income," "remote earnings," or "get paid with minimal effort" are considered spam. 
-          
-          Check for similar phrases in Russian. Here are some examples of spam messages: ${this.spamMsgs.msg.join(
-            "\n"
-          )}
-          
-          Use the following spam keywords to help identify spam keywords: ${JSON.stringify(
-            this.spamKeywords.words
-          )}.`,
-        },
-        { role: "user", content: msg },
-      ],
-      model: this.AI_MODEL || "groq/llama-3.1-8b",
+  // New method: Download and convert image to base64
+  private async downloadImageToBase64(fileId: string): Promise<string | null> {
+    const filePath = await this.getTelegramFilePath(fileId);
+    if (!filePath) return null;
+
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/file/bot${this.TELEGRAM_BOT_TOKEN}/${filePath}`
+      );
+      if (!response.ok) {
+        console.error("Failed to download image:", response.status);
+        return null;
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      if (buffer.length > 10 * 1024 * 1024) {
+        // 10MB limit
+        console.error("Image too large:", buffer.length);
+        return null;
+      }
+
+      const mimeType = response.headers.get("content-type") || "image/jpeg";
+      const base64 = buffer.toString("base64");
+      return `data:${mimeType};base64,${base64}`;
+    } catch (err) {
+      console.error("Error downloading/converting image:", err);
+      return null;
+    }
+  }
+
+  // Updated: AI completion with vision support
+  async getGroqChatCompletion(msg: string, imageBase64?: string) {
+    const messages: any[] = [
+      {
+        role: "system",
+        content: `You are an anti-spam assistant in a group about fishing tours. Analyze the message and/or image carefully. Respond **only** with "is_spam" or "is_no_spam" without any additional text.
+
+        If the content (text or image) mentions fishing (locations, techniques, equipment), respond "is_no_spam".
+        Spam includes: "passive income," "remote work," "earn money easily" or Russian equivalents like "пассивный доход," "удалённая работа," "заработок без усилий".
+        
+        Spam keywords: ${JSON.stringify(this.spamKeywords.words)}.
+        Spam message examples: ${this.spamMsgs.msg.join("\n")}.
+        
+        For images: Use OCR to detect text; check for spam graphics (e.g., job ads, crypto schemes). If image is fishing-related, "is_no_spam".`,
+      },
+      { role: "user", content: msg }, // Text part
+    ];
+
+    // Add image if provided
+    if (imageBase64) {
+      messages[1].content += `\n\n[Analyze this image for spam]`;
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Describe and classify this image as spam or not based on the system prompt.",
+          },
+          { type: "image_url", image_url: { url: imageBase64 } },
+        ],
+      });
+    }
+
+    const aiParams = {
+      messages,
+      model: this.AI_MODEL || "groq/llama-3.2-11b-vision-preview", // Default to vision model
     };
+
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -214,6 +313,28 @@ export class TelegramAntiSpamBot {
     const apiResponse = await response.json();
     console.log("Groq API response:", JSON.stringify(apiResponse, null, 2));
     return apiResponse;
+  }
+
+  // Cache image analysis result
+  private async cacheImageResult(fileId: string, isSpam: boolean) {
+    const cacheStr = await this.env.SPAM_KEYWORDS.get("image_cache");
+    const cache = cacheStr ? JSON.parse(cacheStr) : {};
+    cache[fileId] = { is_spam: isSpam, timestamp: Date.now() };
+    await this.env.SPAM_KEYWORDS.put("image_cache", JSON.stringify(cache), {
+      expirationTtl: 3600,
+    }); // 1 hour TTL
+  }
+
+  // Get cached result for image
+  private async getCachedImageResult(fileId: string): Promise<boolean | null> {
+    const cacheStr = await this.env.SPAM_KEYWORDS.get("image_cache");
+    if (!cacheStr) return null;
+    const cache = JSON.parse(cacheStr);
+    const entry = cache[fileId];
+    if (entry && Date.now() - entry.timestamp < 3600000) {
+      return entry.is_spam;
+    }
+    return null;
   }
 
   async sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
@@ -313,48 +434,54 @@ export class TelegramAntiSpamBot {
     }
   }
 
-  async banUser(msg: TelegramMessage) {
+  // Updated: banUser with image support
+  async banUser(msg: TelegramMessage, fileId?: string) {
     if (!msg.from || !msg.from.id) {
       console.error("Cannot ban user: msg.from is undefined");
       return;
     }
 
-    // Send notification to the user before banning
-    const banMessage = `Ваше сообщение было классифицировано как спам и удалено: "${msg.text}".\nПричина: Сообщение содержит спам (например, рекламу пассивного дохода или удалённой работы). Пожалуйста, воздержитесь от подобных сообщений.`;
+    const reason = fileId ? "spam image" : "spam message";
+    const banMessage = `Ваше сообщение было классифицировано как спам и удалено: "${
+      msg.text || "Image"
+    }"\nПричина: ${reason}. Пожалуйста, воздержитесь от подобных сообщений.`;
     let notificationSent = await this.sendTelegramMessage(
       msg.from.id,
       banMessage
     );
     if (!notificationSent) {
-      // Fallback to group chat
       console.log(
         `Falling back to group chat ${msg.chat.id} for ban notification`
       );
-      /*
-      notificationSent = await this.sendTelegramMessage(
-        msg.chat.id,
-        banMessage
-      );
-      */
+      // notificationSent = await this.sendTelegramMessage(msg.chat.id, banMessage);
     }
 
-    // Increment ban counter and log the ban
-    this.spamKeywords.countOfbannedAI += 1;
+    // Increment appropriate counter
+    if (fileId) {
+      this.spamKeywords.countOfbannedImage += 1;
+    } else {
+      this.spamKeywords.countOfbannedAI += 1;
+    }
+
     const log: SpamLog = {
       user: msg.from,
-      msg: msg.text,
+      msg: msg.text || "Image spam",
       timestamp: Date.now(),
+      file_id: fileId,
     };
     this.spamLogs.push(log);
     await this.saveState();
 
     // Notify admin
     const adminMessage = `BANNED USER: ${JSON.stringify(msg.from)}\nMessage: ${
-      msg.text
+      msg.text || "Image"
+    }\nFile ID: ${
+      fileId || "N/A"
     }\nReason: Detected as spam\nNotification sent: ${notificationSent}`;
     await this.sendTelegramMessage(this.MY_TG_ID, adminMessage);
   }
 
+  // Updated: handle commands with new /testimage
   async handleTelegramCommand(msg: TelegramMessage): Promise<Response> {
     try {
       const chatId = msg.chat.id;
@@ -406,6 +533,52 @@ export class TelegramAntiSpamBot {
           )}`
         );
         return new Response(success ? "OK" : "Failed to send /logs response", {
+          status: success ? 200 : 500,
+        });
+      }
+
+      // New: /testimage <file_id> - for admin testing
+      const testImageMatch = text.match(/^\/testimage (.+)$/);
+      if (testImageMatch && isAdmin) {
+        const fileId = testImageMatch[1];
+        const base64 = await this.downloadImageToBase64(fileId);
+        if (!base64) {
+          const success = await this.sendTelegramMessage(
+            chatId,
+            "Failed to download image."
+          );
+          return new Response(success ? "OK" : "Failed", {
+            status: success ? 200 : 500,
+          });
+        }
+
+        const chatCompletion = (await this.getGroqChatCompletion(
+          "",
+          base64
+        )) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        const aiResult =
+          chatCompletion.choices?.[0]?.message?.content || "error";
+        const isSpam = aiResult === "is_spam";
+        await this.cacheImageResult(fileId, isSpam);
+
+        const success = await this.sendTelegramMessage(
+          chatId,
+          `Image ${fileId}: ${isSpam ? "SPAM" : "OK"} (AI: ${aiResult})`
+        );
+        return new Response(
+          success ? "OK" : "Failed to send /testimage response",
+          {
+            status: success ? 200 : 500,
+          }
+        );
+      } else if (testImageMatch) {
+        const success = await this.sendTelegramMessage(
+          chatId,
+          "Only admins can use /testimage."
+        );
+        return new Response(success ? "OK" : "Failed", {
           status: success ? 200 : 500,
         });
       }
@@ -523,6 +696,7 @@ export class TelegramAntiSpamBot {
     }
   }
 
+  // Updated: main webhook handler with image support
   async handleTelegramWebhook(request: Request): Promise<Response> {
     try {
       // Получаем объект Update из Telegram
@@ -554,14 +728,57 @@ export class TelegramAntiSpamBot {
         return await this.handleTelegramCommand(msg);
       }
 
-      // Антиспам логика
-      const chatCompletion = (await this.getGroqChatCompletion(msg.text)) as {
-        choices?: { message?: { content?: string } }[];
-      };
-      const response = chatCompletion.choices?.[0]?.message?.content || "";
-      console.log("Message from:", msg.from, "AI response:", response);
+      let isSpam = false;
+      let reason = "text";
 
-      if (response === "is_spam") {
+      // Handle text spam first (existing logic)
+      if (msg.text) {
+        const chatCompletion = (await this.getGroqChatCompletion(msg.text)) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        const textResponse =
+          chatCompletion.choices?.[0]?.message?.content || "";
+        console.log("Text AI response:", textResponse);
+        if (textResponse === "is_spam") {
+          isSpam = true;
+        }
+      }
+
+      // New: Handle image spam
+      if (msg.photo && msg.photo.length > 0) {
+        const largestPhoto = msg.photo[msg.photo.length - 1]; // Largest size
+        const fileId = largestPhoto.file_id;
+
+        // Check cache first
+        let imageSpam = await this.getCachedImageResult(fileId);
+        if (imageSpam === null) {
+          const base64 = await this.downloadImageToBase64(fileId);
+          if (base64) {
+            const caption = msg.caption || ""; // Include caption if any
+            const chatCompletion = (await this.getGroqChatCompletion(
+              caption,
+              base64
+            )) as {
+              choices?: { message?: { content?: string } }[];
+            };
+            const imageResponse =
+              chatCompletion.choices?.[0]?.message?.content || "";
+            console.log("Image AI response:", imageResponse);
+            imageSpam = imageResponse === "is_spam";
+            await this.cacheImageResult(fileId, imageSpam);
+          } else {
+            console.log("Skipping image analysis: download failed");
+            imageSpam = false;
+          }
+        }
+        console.log("Image spam result:", imageSpam);
+        if (imageSpam) {
+          isSpam = true;
+          reason = "image";
+        }
+      }
+
+      if (isSpam) {
         const deleted = await this.deleteTelegramMessage(
           msg.chat.id,
           msg.message_id
@@ -573,6 +790,11 @@ export class TelegramAntiSpamBot {
         }
 
         if (msg.from.id === this.MY_TG_ID) {
+          // Admin: just delete, no ban
+          const adminMsg = `Admin message deleted: ${reason} spam (${
+            msg.text || "Image"
+          })`;
+          await this.sendTelegramMessage(this.MY_TG_ID, adminMsg);
           return new Response("Admin spam deleted", { status: 200 });
         } else {
           const restricted = await this.restrictTelegramUser(
@@ -580,7 +802,10 @@ export class TelegramAntiSpamBot {
             msg.from.id
           );
           if (restricted) {
-            await this.banUser(msg);
+            const fileId = msg.photo
+              ? msg.photo[msg.photo.length - 1]?.file_id
+              : undefined;
+            await this.banUser(msg, fileId);
           } else {
             console.error(
               `Failed to restrict user ${msg.from.id} in chat ${msg.chat.id}`
@@ -589,10 +814,12 @@ export class TelegramAntiSpamBot {
               this.MY_TG_ID,
               `Failed to restrict user ${JSON.stringify(
                 msg.from
-              )} for message: ${msg.text}`
+              )} for ${reason} spam: ${msg.text || "Image"}`
             );
           }
-          return new Response("Spam deleted and user banned", { status: 200 });
+          return new Response(`Spam deleted and user banned (${reason})`, {
+            status: 200,
+          });
         }
       }
 

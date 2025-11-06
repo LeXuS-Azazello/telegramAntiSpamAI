@@ -1,6 +1,8 @@
 name = "telegramantispamai"
 main = "worker.ts"
-compatibility_date = "2024-06-01"
+compatibility_date = "2024-09-23" # Use a recent date
+compatibility_flags = ["nodejs_compat"]
+observability.enabled = true
 workers_dev = true
 
 routes = [
@@ -12,9 +14,9 @@ routes = [
 
 [vars]
   TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"
-  MY_TG_ID = 314044882
+  MY_TG_ID = "314044882"
   GROQ_API_KEY = "your-groq-api-key"
-  AI_MODEL = "groq/llama-3.1-8b"
+  AI_MODEL = "groq/llama-3.2-11b-vision-preview"
 
 [[kv_namespaces]]
   binding = "SPAM_KEYWORDS"
@@ -23,6 +25,10 @@ routes = [
 [[kv_namespaces]]
   binding = "SPAM_MSGS"
   id = "6a4045d7cde44272a4305756bd6eb223"
+
+[[kv_namespaces]]
+  binding = "IMAGE_CACHE"
+  id = "69f32efd369e4b6cb8225a3a49437dc5"
 
 [[d1_databases]]
   binding = "DB"
