@@ -9,14 +9,17 @@ routes = [
   "https://telegramantispamai.debug.org.ua/*"
 ]
 
+[ai]
+  binding = "AI"
+
 [observability.logs]
   enabled = true
 
 [vars]
-  TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"
+  TELEGRAM_BOT_TOKEN = ""
   MY_TG_ID = "314044882"
-  GROQ_API_KEY = "your-groq-api-key"
-  AI_MODEL = "groq/llama-3.2-11b-vision-preview"
+  GROQ_API_KEY = ""
+  AI_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 [[kv_namespaces]]
   binding = "SPAM_KEYWORDS"
@@ -34,4 +37,3 @@ routes = [
   binding = "DB"
   database_name = "tg_antispam_db"
   database_id = "13f3a442-4e62-4d91-b6b1-9bd48b9f95f8"
-
